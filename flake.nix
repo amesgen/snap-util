@@ -14,14 +14,18 @@
         inherit (inputs.haskellNix) config;
         overlays = [ inputs.haskellNix.overlay ];
       };
+      inherit (pkgs) lib;
       project = pkgs.haskell-nix.cabalProject' {
         src = ./.;
         compiler-nix-name = "ghc96";
       };
+      get-snap-util-exe = hsPkgs: hsPkgs.snap-util.components.exes.snap-util;
     in
     {
       packages = {
-        default = project.hsPkgs.snap-util.components.exes.snap-util;
+        default = get-snap-util-exe project.hsPkgs;
+      } // lib.optionalAttrs (system == "x86_64-linux") {
+        musl = get-snap-util-exe project.projectCross.musl64.hsPkgs;
       };
       legacyPackages = { inherit project; };
       devShells.default = project.shellFor {
