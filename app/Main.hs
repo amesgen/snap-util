@@ -1,8 +1,11 @@
-module Main where
+module Main (main) where
 
+import Codec.CBOR.Encoding qualified as CBOR (encodeMapLen)
 import Codec.CBOR.FlatTerm qualified as CBOR
 import Codec.CBOR.Read qualified as CBOR
+import Codec.CBOR.Write qualified as CBOR
 import Control.Monad.Except
+import Data.ByteString.Builder qualified as BB
 import Data.ByteString.Lazy qualified as BL
 import Data.Word (Word64)
 import System.Environment
@@ -12,11 +15,15 @@ main =
   getArgs >>= \case
     ["check", file] -> do
       bs <- BL.readFile file
-      let ctxToks = withCtx $ fmap (,()) $ parseCBORTermTokens bs
+      let ctxToks = withCtx $ parseCBORTermTokens bs
       putStrLn $ assess ctxToks
+    ["fixup", file, fileOut] -> do
+      bs <- BL.readFile file
+      let ctxToks = withCtx $ parseCBORTermTokens bs
+      BB.writeFile fileOut $ fixup ctxToks
     _ -> fail "unexpected cli args"
 
-assess :: [(Ctx, CBOR.TermToken, ())] -> String
+assess :: [(Ctx, CBOR.TermToken, a)] -> String
 assess ctxToks = case skipToPointers ctxToks of
   [] -> "Not a Conway ledger state"
   (_, CBOR.TkMapLen len, _) : _
@@ -26,14 +33,48 @@ assess ctxToks = case skipToPointers ctxToks of
   where
     skipToPointers = dropWhile \(ctx, _, _) -> ctx /= pointerCtx
 
-    pointerCtx = CtxListN {len = 2, ix = 1, ctx = CtxListN {len = 6, ix = 4, ctx = CtxListN {len = 2, ix = 1, ctx = CtxListN {len = 4, ix = 1, ctx = CtxListN {len = 7, ix = 3, ctx = CtxListN {len = 3, ix = 1, ctx = CtxListN {len = 2, ix = 1, ctx = CtxListN {len = 2, ix = 1, ctx = CtxListN {len = 7, ix = 6, ctx = CtxListN {len = 2, ix = 0, ctx = CtxListN {len = 2, ix = 1, ctx = CtxTop}}}}}}}}}}}
+fixup :: [(Ctx, CBOR.TermToken, BL.ByteString)] -> BB.Builder
+fixup = go True
+  where
+    go writeEmptyMapLen = \case
+      [] -> mempty
+      (ctx, _, bs) : rest
+        | isInPointerCtx ctx,
+          let bs' =
+                if writeEmptyMapLen
+                  then CBOR.toBuilder $ CBOR.encodeMapLen 0
+                  else mempty ->
+            bs' <> go False rest
+        | otherwise -> BB.lazyByteString bs <> go writeEmptyMapLen rest
 
-parseCBORTermTokens :: BL.ByteString -> [CBOR.TermToken]
+parseCBORTermTokens :: BL.ByteString -> [(CBOR.TermToken, BL.ByteString)]
 parseCBORTermTokens bs
   | BL.null bs = []
-  | otherwise = case CBOR.deserialiseFromBytes CBOR.decodeTermToken bs of
+  | otherwise = case CBOR.deserialiseFromBytesWithSize CBOR.decodeTermToken bs of
       Left e -> error $ show e
-      Right (bs', tok) -> tok : parseCBORTermTokens bs'
+      Right (bs', off, tok) -> (tok, BL.take off bs) : parseCBORTermTokens bs'
+
+pointerCtx :: Ctx
+pointerCtx = CtxListN {len = 2, ix = 1, ctx = CtxListN {len = 6, ix = 4, ctx = CtxListN {len = 2, ix = 1, ctx = CtxListN {len = 4, ix = 1, ctx = CtxListN {len = 7, ix = 3, ctx = CtxListN {len = 3, ix = 1, ctx = CtxListN {len = 2, ix = 1, ctx = CtxListN {len = 2, ix = 1, ctx = CtxListN {len = 7, ix = 6, ctx = CtxListN {len = 2, ix = 0, ctx = CtxListN {len = 2, ix = 1, ctx = CtxTop}}}}}}}}}}}
+
+isInPointerCtx :: Ctx -> Bool
+isInPointerCtx ctx =
+  ctx == pointerCtx || case subCtx ctx of
+    Nothing -> False
+    Just ctx' -> isInPointerCtx ctx'
+
+subCtx :: Ctx -> Maybe Ctx
+subCtx = \case
+  CtxTop -> Nothing
+  CtxBytes {ctx} -> Just ctx
+  CtxString {ctx} -> Just ctx
+  CtxListN {ctx} -> Just ctx
+  CtxList {ctx} -> Just ctx
+  CtxMapNKey {ctx} -> Just ctx
+  CtxMapNVal {ctx} -> Just ctx
+  CtxMapKey {ctx} -> Just ctx
+  CtxMapVal {ctx} -> Just ctx
+  CtxTagged {ctx} -> Just ctx
 
 data Ctx
   = CtxTop
