@@ -1,0 +1,34 @@
+cabal-version: 3.0
+name: snap-util
+version: 0.0.0.0
+license: CC0-1.0
+license-file: LICENSE
+author: amesgen
+maintainer: amesgen@amesgen.de
+
+executable snap-util
+  main-is: Main.hs
+  hs-source-dirs: app
+  default-language: GHC2021
+  ghc-options:
+    -Wall
+    -Wredundant-constraints
+    -Wmissing-deriving-strategies
+    -Wmissing-export-lists
+    -Wno-name-shadowing
+    -Wunused-packages
+    -fhide-source-paths
+
+  build-depends:
+    base,
+    bytestring,
+    cborg,
+    mtl,
+
+  default-extensions:
+    BlockArguments
+    DerivingStrategies
+    LambdaCase
+    NoFieldSelectors
+    OverloadedStrings
+    StrictData
